@@ -117,6 +117,9 @@ def run(g) -> list[tuple[str, str, str]]:
             errs = [l for l in text.splitlines() if "] [E] " in l and not any(b in l for b in BENIGN)]
             out.append(("OK" if not errs else "WARN", "OptiScaler errors",
                         "none" if not errs else f"{len(errs)}: {errs[0][:110]}"))
+    elif (man.get("components") or {}).get("nrlinux"):
+        from . import nrlinux
+        out.extend(nrlinux.verify(g))
     else:
         log = root / "ReShade.log"
         text = _tail(log)
@@ -139,12 +142,22 @@ def run(g) -> list[tuple[str, str, str]]:
         if rep.route == "feeder":
             feed = _tail(root / "dlss5-feed.log")
             if feed:
-                mv = re.findall(r"MV probe .*?(\d+)% non-zero", feed)
+                # Every probe in the session, not just the last one: a probe reads 0% on a
+                # still screen (menu, loading, a paused scene), so judging the provider by
+                # the final sample calls a healthy run broken whenever the player stopped
+                # moving before quitting. The provider works if it ever fed.
+                mv = [int(x) for x in re.findall(r"MV probe .*?(\d+)% non-zero", feed)]
                 if mv:
-                    pct = int(mv[-1])
-                    out.append(("OK" if pct >= 50 else "WARN", "motion vectors",
-                                f"{pct}% of the probe non-zero" + ("" if pct >= 50 else
-                                " -- the provider is not feeding (ReshadeMotionEstimation does not compile on D3D12 here; use VORT)")))
+                    live = [x for x in mv if x >= 50]
+                    if live:
+                        tail = ("" if mv[-1] >= 50 else
+                                f"; the last read {mv[-1]}%, which is what a still screen looks like")
+                        out.append(("OK", "motion vectors",
+                                    f"{len(live)} of {len(mv)} probes fed, peak {max(mv)}%{tail}"))
+                    else:
+                        out.append(("WARN", "motion vectors",
+                                    f"{len(mv)} probe(s), none above 50% -- the provider is not feeding "
+                                    "(ReshadeMotionEstimation does not compile on D3D12 here; use VORT)"))
                 if re.search(r"CreateFeature raised", feed) and (g.api or "").upper() == "DX12":
                     out.append(("BAD", "feeder on D3D12", "the same-device create faults under Proton in most launches "
                                 "(vkd3d-proton, via the DLSS cubin path); no config fixes it -- see the findings; "
