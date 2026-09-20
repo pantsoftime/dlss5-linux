@@ -33,9 +33,9 @@ binaries are redistributed by this repository.
 
 `FINDINGS.md` has the why for each row and the dead ends, so nobody repeats them.
 
-## Five routes, one of them outside the game
+## Six routes, one of them outside the game
 
-Four routes put something in the game folder: OptiScaler as a proxy DLL, or
+Most routes put something in the game folder: OptiScaler as a proxy DLL, or
 ReShade with the feeder / native / bridge add-ons. The fifth,
 [DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer), is a Linux Vulkan
 layer that hands each presented frame to a helper running the model under a
@@ -52,6 +52,26 @@ the game and stops it after (the layer does neither, and an idle helper
 costs a fifth of a core). Run 0.3.0-2 or newer: older builds can hang the GPU on a 1x1 probe swapchain, and
 stall the present thread once a second when a toggle hotkey is bound. What
 the route costs per frame, measured, is in `FINDINGS.md`.
+
+The sixth is `nrlinux`: [addon-dlssnr-linux](https://github.com/NapXDD/addon-dlssnr-linux),
+a ReShade add-on **built on Linux** that drives the neural feature directly
+through a forwarder DLL, bypassing the driver's over-the-air capability gate
+that makes the closed add-on fail under Proton. It wants a D3D12 game with its
+own DLSS Super Resolution -- it runs off that output and uses the game's real
+depth and motion vectors -- so it covers the same ground as OptiScaler, with
+GPL source you can read and patch. It is young: one game on its tested list,
+no multipass or model-resolution dial, and open reports of a GPU fault in 007
+First Light and of the hooks attaching too late in Control (change the DLSS
+setting once to force a re-create). `install --route nrlinux` places it, and
+`verify` reads its own log lines; stage the release's two files under
+`addon-dlssnr-linux/<version>/` next to the tools first.
+
+**One habit the tool now enforces.** A reinstall used to be able to change a
+component's build without saying so -- a label like "4.55" can name two
+different engines, and a locally supplied add-on was not labelled at all. Every
+install now fingerprints the payload files it writes and reports any that
+differ from the previous install, before you decide whether that was what you
+meant. See `FINDINGS.md`.
 
 ## Screenshots
 

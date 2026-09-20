@@ -64,6 +64,9 @@ REPOS = [
     # --- assessed 2026-09-11: the out-of-process Vulkan-layer route (Remake works on it) ---
     ("bmitch87/DLSS5VKLayer", "DLSS5VKLayer",
      "Linux Vulkan layer + Wine helper; the only route for native games and D3D12-without-DLSS"),
+    # --- surfaced 2026-09-20 (feeder #121): Linux-built ReShade add-on driving feature 18 directly ---
+    ("NapXDD/addon-dlssnr-linux", "addon-dlssnr-linux",
+     "GPL ReShade add-on for D3D12+DLSS games under Proton; forwarder bypasses the OTA 'OutOfDate' gate; fallback where OptiScaler faults"),
     ("jp7677/dxvk-nvapi", "dxvk-nvapi",
      "NVAPI D3D12 cubin path faults on the feeder's same-device create (FINDINGS.md)"),
     ("HansKristian-Work/vkd3d-proton", "vkd3d-proton",

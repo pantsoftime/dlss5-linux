@@ -67,6 +67,34 @@ September 2026. Dates matter: the projects involved ship several times a day.
 * ReshadeMotionEstimation does not compile on ReShade's D3D12 backend
   (`error X3020: cannot sample from texture that is also used as render target`);
   VORT (`DLSS5_MV_PROVIDER=2`) does and feeds real vectors.
+* **ReShade's Generic Depth can silently select nothing, and then DLAA runs
+  with no depth at all.** On Dreamfall every candidate depth buffer was
+  3840x1440 while the backbuffer was 5120x1440, and the add-on's default
+  "Similar aspect ratio" heuristic rejected all of them as the wrong shape, so
+  it picked none. Nothing said so: the game rendered, the feed reported
+  "Working.", and only the feeder's own depth probe showed it --
+  `min 0, max 0, variance 0` on every sample, including ones taken while the
+  scene was moving. Ticking the right buffer by hand in the overlay
+  (Add-ons -> Generic Depth; take the full-height one with the most draw
+  calls) fixed it immediately. `verify` surfaces the probe.
+* **That mismatch was the game rendering below the display's resolution.**
+  Dreamfall's stored Unity resolution was 3840x1440 on a 5120x1440 display, and
+  Proton presented the smaller render into a full-size swapchain -- so the feed
+  saw 5120x1440 and DLAA was anti-aliasing an image that had already been
+  upscaled. The game's own resolution menu never offered the native mode; Unity
+  takes it on the command line regardless:
+  `%command% -screen-width 5120 -screen-height 1440`. Worth checking before
+  concluding anything about image quality on an ultrawide.
+  Fixing it also fixed depth detection permanently: the depth buffers are now
+  the same shape as the backbuffer, so the heuristic accepts them and no manual
+  pick is needed after a restart (ReShade persists the heuristic settings, but
+  never the chosen buffer -- handles change every run).
+  Cost of going native, same scene: feed GPU 6.85 -> 6.95 ms/frame, frame
+  interval 10.4 -> 10.9 ms.
+* DLSS5-Feeder **1.16.0-beta.5** runs this route. Against 0.14.0-beta.5 the
+  feed's own cost fell sharply (CPU 17.93 -> 0.30 ms/frame, GPU 21.42 -> 6.85
+  ms/frame), though the two sessions were different scenes, so treat the
+  direction as the finding and not the exact numbers.
 * `PROTON_DLSS_UPGRADE=1` and the feeder: the game-local `nvngx_dlss.dll`
   must stay (with no NVAPI use in the game, the driver-store copy is not found
   on its own), and the classic RenoDX add-on tolerates the second copy the
@@ -84,6 +112,22 @@ September 2026. Dates matter: the projects involved ship several times a day.
 
 `NVSDK_NGX_D3D12_EvaluateFeature_C` is not exported by any NGX core on Linux;
 the add-ons' hook miss on it is baseline, not a fault.
+
+**The build matters more than the label, and a reinstall can change it under
+you.** On 2026-09-20 a reinstall of a working Dreamfall setup replaced the
+classic `++` build with the catalog's "4.55" download -- the 1.7 MB v4.x
+engine in the table above -- and the game died on the first neural evaluate:
+`0xC0000005` inside `nvngx_dlssnr.dll`, reached through the add-on, followed by
+a `std::system_error` ("resource deadlock would occur") inside the add-on
+itself. The feeder caught the first fault cleanly and stopped; the second one
+killed the process. Two things made this easy to miss: the two builds can carry
+the same version label (DLSS5-Feeder #90 notes the rhi-repo download named
+"4.55" carries v4.6 engine markers), and the install record stored no component
+label at all when a local add-on file was used. The tool now fingerprints the
+payload files it installs (sha256, in `component_files` in the manifest) and
+reports any that differ from the previous install, so a swap is visible instead
+of silent. It reports rather than blocks: a deliberate upgrade and an accidental
+swap look identical from there.
 
 ## Proton and DLSS knobs
 
