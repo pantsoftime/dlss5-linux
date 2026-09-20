@@ -97,10 +97,13 @@ def report(g: games.Game, sm: int | None) -> None:
         print(f"   {mark} {r:<11} {lvl:<12} {note[:70]}")
     opt = installer.Options(path=s.recommended, native_dlss=s.native_dlss, upscaler=s.upscaler)
     print(f"  plan      {' -> '.join(installer.plan(g, opt))}")
-    from linuxport import vklayer
+    from linuxport import vklayer, nrlinux
     hint = vklayer.suggestion(g, s.native_dlss)
     if hint:
         print(f"  vk layer  {hint}")
+    hint = nrlinux.suggestion(g, s.native_dlss)
+    if hint:
+        print(f"  nrlinux   {hint}")
 
 
 def options_from(args, s) -> installer.Options:
@@ -121,6 +124,52 @@ def options_from(args, s) -> installer.Options:
     return opt
 
 
+def cmd_install_nrlinux(g, s, args) -> int:
+    """addon-dlssnr-linux as the add-on: the core native route, then the file swap."""
+    from linuxport import nrlinux, seed
+    ok, why = nrlinux.fit(g, s.native_dlss)
+    if not ok and not args.force_route:
+        sys.exit(f"route nrlinux does not fit this game: {why}. Use --force-route to override.")
+    if installer.MANIFEST and (g.install_dir / installer.MANIFEST).is_file() and not nrlinux.installed(g.install_dir):
+        from core import diagnose
+        cur = (diagnose._manifest(g.install_dir) or {}).get("path") or "?"
+        sys.exit(f"this folder already carries the {cur!r} route -- run `uninstall` first so its files come out cleanly")
+    opt = nrlinux.options(args, s)
+    ver, _ = nrlinux.staged(getattr(args, "nrlinux_version", None))
+    print(f"\n{g.name}  ->  route=nrlinux (core native route + addon-dlssnr-linux {ver})  proxy={opt.reshade_proxy or 'auto'}")
+    pv = installer.preview(g, opt)
+    for line in installer.preview_lines(pv):
+        print("  " + line)
+    from linuxport import components as _comp
+    for line in _comp.advisory(g.install_dir):
+        print("  " + line)
+    if args.dry_run:
+        return 0
+    if pv.blockers:
+        return 1
+    if not args.yes and input("  proceed? [y/N] ").strip().lower() != "y":
+        return 1
+    seed.seed()
+    rep = installer.install(
+        g, opt,
+        on_step=lambda i, n, name: print(f"  [{i+1}/{n}] {name}"),
+        on_prog=lambda pct, msg: None,
+        on_log=lambda m: print("   " + m))
+    print("  [+] addon-dlssnr-linux")
+    nrlinux.finish(g, rep, log=print)
+    print(f"\n  done. Launch options: {proton_launch_hint(g)}")
+    print("  In game: DLSS Super Resolution ON, then ReShade overlay (Home) > Add-ons > DLSSNR Linux; F10 A/Bs the pass.")
+    return 0
+
+
+def proton_launch_hint(g) -> str:
+    from linuxport import proton
+    try:
+        return proton.launch_options(g, "dxgi.dll", route="native")
+    except Exception:
+        return 'WINEDLLOVERRIDES="dxgi=n,b" %command%'
+
+
 def cmd_install(args) -> int:
     from linuxport import seed
     g = find(args.target, getattr(args, 'prefix', None))
@@ -132,6 +181,8 @@ def cmd_install(args) -> int:
     if proton.running(g) and not args.dry_run:
         sys.exit(f"{g.exe.name} is running -- close it first")
     s = dlss.detect(g.install_dir, g.folder, g.api, g.bitness, sm=sm)
+    if args.route == "nrlinux":
+        return cmd_install_nrlinux(g, s, args)
     if args.route and args.route not in s.options and not args.force_route:
         sys.exit(f"route {args.route!r} is not offered for this game ({g.api} x{g.bitness}); "
                  f"offered: {', '.join(s.options)}. Use --force-route to override.")
@@ -140,6 +191,9 @@ def cmd_install(args) -> int:
           f"optiscaler={args.optiscaler}  addon={args.addon or 'catalog/auto'}")
     pv = installer.preview(g, opt)
     for line in installer.preview_lines(pv):
+        print("  " + line)
+    from linuxport import components
+    for line in components.advisory(g.install_dir):
         print("  " + line)
     if args.dry_run:
         return 0
@@ -288,6 +342,8 @@ def cmd_vklayer(args) -> int:
     print(f"\nDLSS5VKLayer\n{'-' * 60}")
     m = vklayer.manifest()
     print(f"  layer     {'installed: ' + str(m) if m else 'not installed -- ' + vklayer.UPSTREAM + ' (examples/vklayer)'}")
+    if vklayer.patched_install():
+        print(f"            {vklayer.patched_install()}")
     print(f"  helper    {vklayer.helper_exe() or 'dlssnr-helper not on PATH'}   {'running' if vklayer.helper_running() else 'stopped'}")
     if vklayer.helper_running():
         print("            it stays up after the game exits and spins ~18% of one core while idle: "
@@ -339,7 +395,7 @@ def main() -> int:
             sp.add_argument("--indicator", action="store_true", help="add PROTON_DLSS_INDICATOR=1 (on-screen DLSS/FG readout)")
             sp.add_argument("--no-indicator", action="store_true")
         if name == "install":
-            sp.add_argument("--route", choices=["native", "optiscaler", "upstream", "bridge", "feeder", "standalone", "renodx", "remix"])
+            sp.add_argument("--route", choices=["native", "optiscaler", "upstream", "bridge", "feeder", "standalone", "renodx", "remix", "nrlinux"])
             sp.add_argument("--addon", help="local renodx add-on file (-> Options.renodx_local)")
             sp.add_argument("--dlssnr", help="catalog label, e.g. 310.8.0 (default: best for this GPU)")
             sp.add_argument("--dlss", help="catalog label for nvngx_dlss (default: newest)")

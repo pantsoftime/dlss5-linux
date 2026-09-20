@@ -1,5 +1,5 @@
 """Linux backends for the upstream DLSS5-Autopilot core. Call activate() once."""
-from . import linux_gpu, games, paths, pe, policy, state, pins, tuning, diagnosefix
+from . import linux_gpu, games, paths, pe, policy, state, pins, tuning, diagnosefix, components
 
 
 def activate() -> None:
@@ -12,3 +12,4 @@ def activate() -> None:
     pins.install()
     tuning.install()
     diagnosefix.install()
+    components.install()

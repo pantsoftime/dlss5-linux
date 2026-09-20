@@ -31,7 +31,10 @@ REASON_DLSS_D3D12 = (
     "model-resolution dial and multipass. The native route is listed too: it "
     "leaves the game's DLSS untouched (frame generation and ray reconstruction "
     "stay the game's own) and is the one to pick if OptiScaler's overlay "
-    "misbehaves in a title.")
+    "misbehaves in a title. A third option on this class of game is nrlinux: "
+    "NapXDD's addon-dlssnr-linux, a Linux-built ReShade add-on that drives "
+    "feature 18 through a forwarder and skips the driver's OTA gate "
+    "(install --route nrlinux; experimental, one tested title upstream).")
 REASON_DLSS_D3D11 = (
     "A D3D11 game with DLSS: the add-on routes need a D3D12 device, so only "
     "OptiScaler works here -- it bridges the game to D3D12 (Dx11Upscaler=dlss_12) "
