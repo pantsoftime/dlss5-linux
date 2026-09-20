@@ -2992,6 +2992,18 @@ def game_dll_targets(target: Target, names: list[str]) -> dict[str, list[Path]]:
     return {key: sorted(paths) for key, paths in found.items()}
 
 
+def dll_swap_live(record: dict) -> bool:
+    """True when the swapped file is still the one on disk.
+
+    A game update rewrites the runtimes it ships (007 First Light's 2026-09-15
+    patch put its own 310.7.128 back over our 310.9.1), and the state file
+    cannot know. So the record is checked against the file every time it is
+    shown or acted on, and a record whose file has moved on is reported as
+    such rather than as a live swap."""
+    path = Path(record.get("target", ""))
+    return path.is_file() and sha256_file(path) == record.get("installed_hash")
+
+
 def load_dll_state(target: Target) -> tuple[Path, dict]:
     state_path = target.folder / DLLS_STATE_NAME
     if not state_path.is_file():
@@ -3012,7 +3024,14 @@ def print_dll_table(present: dict[str, list[Path]], target: Target,
         label = DLL_LABELS.get(name, name)
         for path in present[name]:
             version = pe_file_version(path) or "?"
-            mark = "  <- swapped" if str(path) in swapped else ""
+            mark = ""
+            record = swapped.get(str(path))
+            if record:
+                if dll_swap_live(record):
+                    mark = "  <- swapped"
+                else:
+                    when = dt.datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d")
+                    mark = f"  <- swap undone by a game update on {when} (the game's own again)"
             print(f"  {label:<20} {version:<12} "
                   f"{path.relative_to(target.root)}{mark}")
         offered = sources.get(name)
@@ -3055,10 +3074,17 @@ def do_dlls(args) -> int:
         except Fail as error:
             log(str(error), "WARN")
         print_dll_table(present, target, sources, swapped)
-        if records:
-            print(f"\n{len(records)} DLL(s) swapped on "
+        live = [r for r in records if dll_swap_live(r)]
+        stale = [r for r in records if not dll_swap_live(r)]
+        if live:
+            print(f"\n{len(live)} DLL(s) swapped on "
                   f"{state.get('installed_at', '?')}. Undo: dlls <target> restore")
-        else:
+        if stale:
+            print(f"\n{len(stale)} swap(s) from {state.get('installed_at', '?')} no longer on disk: "
+                  "a game update put its own runtimes back. Swap again with "
+                  "'dlls <target> install' (the current files become the originals it backs up); "
+                  "'restore' clears the stale records.")
+        if not records:
             print("\nNo DLLs swapped by this tool.")
         return 0
 
@@ -3070,7 +3096,13 @@ def do_dlls(args) -> int:
         if not confirm(f"Restore {len(records)} DLL(s) in {target.root}?", args.yes):
             log("Cancelled.", "WARN")
             return 1
-        skipped = restore_records(records, check_hashes=True, force=args.force)
+        live = [r for r in records if dll_swap_live(r)]
+        for r in records:
+            if r not in live and not args.force:
+                log(f"{Path(r['target']).name}: a game update already replaced the swapped file; "
+                    "nothing to restore, record cleared", "INFO")
+        skipped = restore_records(records if args.force else live,
+                                  check_hashes=True, force=args.force)
         if skipped:
             log("Skipped: " + "; ".join(skipped), "WARN")
             log("Swap state retained so you can retry.", "WARN")
@@ -3136,6 +3168,13 @@ def do_dlls(args) -> int:
                 staged[source.origin] = path
             staged_path = staged[source.origin]
             prior = swapped.get(str(destination))
+            if prior and not dll_swap_live(prior):
+                # A game update replaced our swap: what is on disk now is the
+                # game's own file again, and that is what a later restore must
+                # bring back. Back it up fresh; the earlier backup is left.
+                log(f"{destination.name}: the earlier swap was undone by a game update; "
+                    "backing up the game's current file as the original", "INFO")
+                prior = None
             if prior:
                 # Already swapped once. Keep pointing at the game's true
                 # original, otherwise a second swap would make the first swap's
