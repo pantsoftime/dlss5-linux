@@ -118,6 +118,16 @@ def helper_running() -> bool:
         return False
 
 
+def patched_install() -> str | None:
+    """A locally patched layer/helper is in place when the installer left the shipped
+    files beside them as *.orig-<version> (see install-patched.sh)."""
+    lib = _HOME / ".local/lib/dlssnr"
+    origs = sorted(lib.glob("helper/dlssnr_helper.exe.orig-*")) + sorted(lib.glob("layer/libVkLayer_NV_dlssnr.so.orig-*"))
+    if not origs:
+        return None
+    return "patched build in place (shipped " + ", ".join(sorted({o.name.split(".orig-")[-1] for o in origs})) + " kept beside it)"
+
+
 def runtime() -> tuple[str | None, str]:
     """(sha256, label) of the nvngx_dlssnr.dll the helper will load."""
     p = BINARIES / "nvngx_dlssnr.dll"
@@ -224,6 +234,8 @@ def verify(g) -> list[tuple[str, str, str]]:
         out.append(("BAD", "vk layer", f"not installed (no VK_LAYER_NV_dlssnr manifest or dlssnr-helper on PATH) -- {UPSTREAM}"))
         return out
     out.append(("OK", "vk layer", f"installed: {manifest()}"))
+    if patched_install():
+        out.append(("INFO", "vk layer build", patched_install()))
     cur = proton.current_launch_options(g)
     out.append(("OK" if enabled_in(cur) else "BAD", "launch token",
                 f"{ENV} present" if enabled_in(cur) else f"{ENV} missing -- the layer stays inert: launch-options --vklayer --apply"))

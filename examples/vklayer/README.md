@@ -126,18 +126,24 @@ in shared memory, and the layer's lines in the Proton log: feature create
 result and size, frames through the model, transport, HDR state, and the
 per-frame rebuild described below.
 
-## Caveats (0.3.0-2, measured here)
+## Caveats (0.3.0-3, measured here)
 
-1. **HDR10 swapchains: play in SDR for now.** The layer's `Prepare()` compares
-   the raw PQ transfer flag against a value it stores normalised to zero
-   whenever the proxy is 8-bit, so on a PQ10 swapchain it rebuilds its whole
-   composition every frame. `verify --vklayer` counts it.
+1. **HDR10 swapchains rebuild the whole composition every frame.** The layer's
+   `Prepare()` compares the raw PQ transfer flag against a value it stores
+   normalised to zero whenever the proxy is 8-bit, so on a PQ10 swapchain the
+   comparison never matches. `verify --vklayer` counts it. Fixed by a local
+   patch -- see `patches/` -- which brought builds per session down from one
+   per frame to four. Unpatched, play in SDR.
 2. **The float16 HDR proxy does not engage on this runtime**: the helper only
    tries HDR when `GetFeatureRequirements` reports it, and that query returns
    `0xbad00005` (feature not supported), so the model is created SDR and sees
    PQ code values as an 8-bit picture. NVAPI is reachable in the helper's
    prefix (checked with `DXVK_NVAPI_LOG_LEVEL=info`), so this is the gate, not
-   the setup.
+   the setup. A local patch in `patches/` opens the gate and confirms the
+   mechanism -- the model accepts the HDR create and the layer switches to the
+   float16 proxy -- but upstream's composition on linear light then produces a
+   hazy, desaturated picture, which is a separate defect. So HDR runs on the
+   8-bit proxy (`set hdrmode 1`) with the rebuild fix, and looks correct.
 3. **No zero-copy under a Wine runner.** dma-buf needs the fd-based
    external-memory extensions on the Wine-side device and winevulkan does not
    expose them; frames cross shared memory. `ptrace_scope` does not matter on
