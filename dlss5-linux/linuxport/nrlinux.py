@@ -32,7 +32,8 @@ import json
 import re
 from pathlib import Path
 
-from core import installer, dlss
+from core import installer as _inst, dlss
+from core import installer
 
 ROUTE = "nrlinux"
 ADDON = "dlssnr-linux.addon64"
@@ -58,6 +59,25 @@ def staged(version: str | None = None) -> tuple[str, Path] | None:
         return None
     d = max(dirs, key=lambda p: _vkey(p.name))
     return d.name, d
+
+
+def install() -> None:
+    """Teach the core that this add-on file is ours.
+
+    other_ngx_hooks() flags every *.addon64 it does not recognise as a second
+    thing rewriting the same NGX calls. Our add-on is renamed out of the core's
+    known set, so without this every verify on this route reports the add-on it
+    just installed as a foreign hook.
+    """
+    if getattr(_inst, "_NRLINUX_KNOWN", False):
+        return
+    src = _inst.other_ngx_hooks
+
+    def other_ngx_hooks(root, path: str = ""):
+        return [f for f in src(root, path) if Path(f).name.lower() != ADDON.lower()]
+
+    _inst.other_ngx_hooks = other_ngx_hooks
+    _inst._NRLINUX_KNOWN = True
 
 
 def fit(g, native_dlss: bool) -> tuple[bool, str]:
@@ -131,6 +151,14 @@ def finish(g, rep, log=print) -> str:
     data["variant"] = ROUTE
     data.setdefault("notes", []).append(f"addon-dlssnr-linux {ver} in place of renodx-dlss5 ({UPSTREAM})")
     man.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf8")
+    # Re-take the component fingerprints. install() took them while the add-on
+    # still had the core route's name and before the forwarder existed, so the
+    # manifest would otherwise record a file that is no longer there and miss
+    # one that is -- and the next install would report a phantom removal and a
+    # phantom addition instead of a build change.
+    from . import components
+    rep.written = files
+    components.record(root, rep)
     return ver
 
 
