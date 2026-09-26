@@ -1,7 +1,10 @@
-# Local patches against DLSS5VKLayer 0.3.0-3
+# Local patches against DLSS5VKLayer
 
-Two patches against upstream commit `4dc63ab9adf4c34831b3db7d58acdbcbf866c9f8`,
-addressing caveats 1 and 2 in the route's README. They are offered as a diff,
+Two patches, first written against 0.3.0-3 (upstream commit
+`4dc63ab9adf4c34831b3db7d58acdbcbf866c9f8`), addressing caveats 1 and 2 in the
+route's README. They apply unchanged to **0.3.1-1** (`117c953`), which is what
+runs here now; 0.3.1-2 does not touch either patched file. The diff in this
+folder is the same two hunks at both bases. They are offered as a diff,
 not as binaries: DLSS5VKLayer is AGPL-3.0 and its own build instructions are the
 right way to produce the two `.so` files and the Wine-side helper `.exe`.
 
@@ -41,7 +44,12 @@ who wants to work on it.
 
 ## Building and installing
 
-Build upstream normally at the base commit with the two patches applied, then:
+Upgrading means the whole install moves together: put the shipped files back
+(`install-patched.sh restore`), install the new upstream release over them
+(its GUI, `dlssnr-shmctl` and helper script must match the layer, since a
+protocol bump makes mixed parts refuse each other), then build the new release
+with the two patches and swap the three binaries in. Build upstream normally at
+the base commit with the two patches applied, then:
 
 ```bash
 ./install-patched.sh install   # swaps in layer64, layer32 and the helper,

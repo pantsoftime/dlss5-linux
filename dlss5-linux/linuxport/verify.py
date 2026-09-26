@@ -32,14 +32,28 @@ def run(g) -> list[tuple[str, str, str]]:
     if not rep.route and any((root / n).is_file() for n in ("ReShade.log", "OptiScaler.log", "dlss5-feed.log")):
         out.append(("WARN", "stale logs", "no in-process payload is installed here; the add-on lines below come from logs "
                     "an earlier route left behind (restore keeps them). The vk layer section, if any, is current."))
+    # Nothing of ours is in this folder and the launch line carries the VK layer:
+    # the route is out of process. Upstream's analysis only knows in-folder
+    # routes, so with no manifest and no log it concludes "not started since the
+    # install" and suggests another proxy name -- advice for a route that is not
+    # in use. Say what the route is and leave the layer's own section to report.
+    from . import vklayer as _vk
+    try:
+        _cur = proton.launcher_overrides(g) if proton.is_xlcore(g) else proton.current_launch_options(g)
+    except Exception:
+        _cur = ""
+    oop = not rep.route and _vk.enabled_in(_cur) and not any(
+        (root / n).is_file() for n in ("ReShade.log", "OptiScaler.log", "dlss5-feed.log"))
+    if oop:
+        out[-1] = ("INFO", "route", "vk layer (out of process: nothing is installed in the game folder)")
     seen: set[tuple[str, str]] = set()
-    for f in rep.findings:                     # upstream re-registers per device; dedupe
+    for f in ([] if oop else rep.findings):    # upstream re-registers per device; dedupe
         key = (f.title, f.detail)
         if key in seen:
             continue
         seen.add(key)
         out.append((f.level.upper(), f.title, f.detail))
-    if rep.verdict:
+    if rep.verdict and not oop:
         out.append(("INFO", "verdict", rep.verdict))
 
     # --- Proton -----------------------------------------------------------

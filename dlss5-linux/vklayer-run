@@ -96,6 +96,18 @@ if [ "${DLSSNR_GUI:-1}" != 0 ] && [ -n "$gui" ]; then
         gui_pid=$!
         log "dlssnr-gui opened (pid $gui_pid) -- minimise it, do not close it: closing stops the helper"
     fi
+else
+    # No GUI means nobody pushes the saved settings into shared memory: the
+    # helper starts from the header's defaults, and a protocol bump (0.3.0 ->
+    # 0.3.1 moved it 19 -> 20) resets even a header that was set by hand. The
+    # one that matters for the picture is the HDR mode -- auto puts an HDR10
+    # game on the float16 path, which composes wrongly on 0.3.x -- so carry
+    # that one over from the GUI's own config.
+    cfg="${XDG_CONFIG_HOME:-$HOME/.config}/dlssnr/config.ini"
+    hm="$(sed -n 's/^set_hdr_mode=\([0-9]\)$/\1/p' "$cfg" 2>/dev/null | head -1)"
+    if [ -n "$hm" ] && [ -n "$shmctl" ] && "$shmctl" "$shm" set hdrmode "$hm" >/dev/null 2>&1; then
+        log "no GUI: applied saved hdrmode=$hm from config.ini"
+    fi
 fi
 
 # --- 3. the game ------------------------------------------------------------------
