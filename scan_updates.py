@@ -67,6 +67,9 @@ REPOS = [
     # --- surfaced 2026-09-20 (feeder #121): Linux-built ReShade add-on driving feature 18 directly ---
     ("NapXDD/addon-dlssnr-linux", "addon-dlssnr-linux",
      "GPL ReShade add-on for D3D12+DLSS games under Proton; forwarder bypasses the OTA 'OutOfDate' gate; fallback where OptiScaler faults"),
+    # --- surfaced 2026-09-24 (VKLayer #26): native Vulkan reimplementation of the NR network ---
+    ("maanHimself/OpenDLSS-NR", "OpenDLSS-NR",
+     "MIT Vulkan reimplementation of DLSS-NR 310.8 (bit-exact claim, user-supplied weights); DLSS5VKLayer's maintainer is considering it to drop the Wine helper"),
     ("jp7677/dxvk-nvapi", "dxvk-nvapi",
      "NVAPI D3D12 cubin path faults on the feeder's same-device create (FINDINGS.md)"),
     ("HansKristian-Work/vkd3d-proton", "vkd3d-proton",

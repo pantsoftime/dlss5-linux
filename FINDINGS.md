@@ -274,8 +274,42 @@ route, which does not enter the process at all.
 * **Native Linux Vulkan, smoke-tested.** `VKLayer_DLSS5=1 vkcube` put 1,830
   frames through the model at 500x500: the layer, transport and helper work
   for a native Vulkan process, not only for Proton. No real native game yet.
-* **Not done.** An SDR-mode run without finding 1, a reduced working scale,
-  a native Linux game, Cyberpunk with its mod stack.
+* **Where the frame rate stops, measured (0.3.1-1, 2026-09-20).** FF7 Remake at
+  3840x2160, HDR on the 8-bit proxy. The game ran at 60 fps with the GPU at
+  75-80%, and nothing outside the layer was limiting it: the busiest game
+  thread sat near 20% of a core, no frame cap was set, and the card was in its
+  top power state well under its limit. The layer's own cost per frame is the
+  ceiling, because the present thread waits for the helper's answer before the
+  game can queue the next frame. Changing `workingscale` live:
+
+  | workingscale | model raster | layer total | ceiling | model evaluate |
+  |---|---|---|---|---|
+  | 1.00 | 3840x2160 | 16.4 ms | 61 fps | 10.6 ms |
+  | 0.75 | 2880x1620 | 11.4 ms | 88 fps | 6.6 ms |
+  | 0.50 | 1920x1080 | 8.6 ms | 116 fps | 4.1 ms |
+
+  At 0.75 the game measured 85.7 fps against that 87-89 fps ceiling. Encoding
+  barely moves with the scale (4.4 -> 3.6 ms), so about 3.6 ms plus optical flow
+  is the floor. Motion quality Fast trims flow from 1.7 to 1.1 ms (ceiling 89
+  -> 95 fps); a cheaper downscale filter did not help. The GPU stays near 80%
+  at the ceiling for a structural reason: the work is serial inside the
+  present call, and the frame crosses ordinary shared memory both ways because
+  zero-copy is unavailable under a Wine runner, so about 2 ms of every frame
+  has no GPU work queued by either process. Nothing configurable removes that.
+  What would: overlapping the model with the next frame's rendering, or a
+  helper that is not a separate Windows process. The maintainer has said they
+  are considering [OpenDLSS-NR](https://github.com/maanHimself/OpenDLSS-NR) --
+  an MIT Vulkan reimplementation of the 310.8 network that ships without
+  weights -- to move away from the split design (upstream #26). No code yet.
+* **Upgrading resets live settings when the protocol moves.** 0.3.0 -> 0.3.1
+  bumped the shared-memory protocol from 19 to 20, so the header came back
+  with defaults: HDR mode returned to auto, which on an HDR10 swapchain is the
+  float16 path that composes wrongly. `dlssnr-gui` pushes the saved
+  `config.ini` values within seconds of opening, so a normal launch recovers.
+  `vklayer-run` now does the same for the HDR mode itself when started with
+  `DLSSNR_GUI=0`. All four parts -- layer, helper, GUI and `dlssnr-shmctl` --
+  must be the same release.
+* **Not done.** A native Linux game, Cyberpunk with its mod stack.
 
 ## Neural-rendering runtime builds, by hash
 
@@ -298,6 +332,28 @@ feeder + classic add-on on Dreamfall unchanged, the VK layer runs. Neither
 driver ships `nvngx_dlssnr.dll`; the runtime always came from the community
 archive. A `GetDriverStore ... -3FFFFFFE` warning in OptiScaler.log is a
 Windows registry query that cannot succeed under Wine; harmless.
+
+## DLSS5-Feeder 1.16.0-beta.7 on Dreamfall (2026-09-23)
+
+The feeder route runs 1.16.0-beta.7 here, with the classic `++` RenoDX
+consumer, VORT motion and the game at native 5120x1440. It fixes a crash in
+beta.4 to beta.6 that any D3D11 user could trip: dragging the add-on's
+work-resolution slider below 100 killed the game, because a warning drawn
+under the slider was passed to the UI as a printf format string. A session on
+beta.7 was clean: five neural feature creations at full resolution, motion
+fed in 19 of 21 probes, depth detected automatically, no GPU faults, and the
+feed's own GPU cost at 6.64-6.69 ms per frame during play, against
+6.85-6.95 ms on beta.5. The feeder's fixes now land on the 1.17 line, which
+adds consumers and an experimental output stabiliser but nothing this route
+needs yet.
+
+**The feeder's "stable" release is not always stable.** DLSS5-Feeder publishes
+its betas without GitHub's pre-release flag, so GitHub's "latest release"
+answered `v1.16.0-beta.6` on 2026-09-21. The port's resolver trusted that for
+an install that named no version; it now reads the tag instead, and takes the
+newest release whose tag carries no beta, rc or preview marker. A pinned tag
+and the explicit pre-release choice are unchanged. DLSS5-Autopilot 2.0.4
+fixed the same thing upstream.
 
 ## DLSS5-Feeder 0.15.x and 1.16 (2026-09-09/10)
 
