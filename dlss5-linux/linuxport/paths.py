@@ -21,6 +21,14 @@ def install() -> None:
     net.CACHE = CACHE / "cache"
     prefs.FILE = CONFIG / "settings.json"
     log.DIR = STATE
-    diagnose.STANDALONE_LOG = STATE / "standalone-dlssnr.log"
+    try:
+        from core.diagnose import model as _model
+        _model.STANDALONE_LOG = STATE / "standalone-dlssnr.log"
+    except Exception:
+        pass
+    try:
+        diagnose.STANDALONE_LOG = STATE / "standalone-dlssnr.log"
+    except Exception:
+        pass
     for d in (net.CACHE, CONFIG, STATE):
         d.mkdir(parents=True, exist_ok=True)

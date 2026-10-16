@@ -41,7 +41,7 @@ class Ini:
     def parse(cls, text: str) -> "Ini":
         ini = cls()
         cur = 0
-        for line in text.splitlines():
+        for line in text.lstrip("\ufeff").splitlines():
             s = line.strip()
             if not s or s[0] in ";#":
                 continue
@@ -148,6 +148,86 @@ def write_reshade_ini(game_dir: Path, provider: int = 3) -> None:
     ini.save(p)
 
 
+# The overlay key, for keyboards that do not have the default one. ReShade
+# opens on Home and OptiScaler on Insert, and a laptop or a 60% keyboard
+# often has neither (#88). Windows virtual-key codes, because that is what
+# both of them store: ReShade as "<vk>,0,0,0" in [INPUT] KeyOverlay,
+# OptiScaler as hex in [Menu] ShortcutKey.
+# What "write nothing" is stored as in the table. ReShade then opens on
+# Home and OptiScaler on Insert, which is why the entry is not named after
+# either of them - and why it may not carry Home's own key code: with both
+# on 0x24 the stored value could not say which of the two had been picked,
+# so picking Home wrote Home and then told the person to press Insert.
+ROUTE_DEFAULT = 0
+
+OVERLAY_KEYS = {
+    # Not "Home": this entry writes nothing, and ReShade then opens on
+    # Home while OptiScaler opens on Insert. Naming one was wrong on the
+    # other route. It must keep the word "default" - the GUI reads it.
+    "route default": ROUTE_DEFAULT,
+    # Home is ReShade's own default and OptiScaler's is Insert, so both are
+    # listed: on the OptiScaler route "route default" is Insert, and someone
+    # who wants Home has to be able to ask for it.
+    "Home": 0x24,
+    "Insert": 0x2D,
+    "End": 0x23,
+    "Delete": 0x2E,
+    "Page Up": 0x21,
+    "Page Down": 0x22,
+    "Backspace": 0x08,
+    "F9": 0x78,
+    "F10": 0x79,
+    "F11": 0x7A,
+    "F12": 0x7B,
+    # Two more that full-size and compact boards both tend to keep, for a
+    # keyboard with no Home, Insert or navigation cluster at all (#214).
+    "Pause": 0x13,
+    "Scroll Lock": 0x91,
+}
+
+
+def overlay_key_name(default: str = "Home") -> str:
+    """What to tell the person to press, given what they chose.
+
+    Every "press Home" and "press Insert" in the install instructions and
+    the diagnosis goes through here. The video player's own ReShade is not
+    written with this key and keeps Home.
+    A person who rebound the key because their keyboard has neither (#88)
+    must not then be told to press one of them.
+    """
+    from . import prefs
+    try:
+        vk = int(prefs.get("overlay_key") or 0)
+    except (TypeError, ValueError):
+        vk = 0
+    # ROUTE_DEFAULT means "write nothing", and it is stored as 0. A hand
+    # edited settings file can still carry the code itself, and the caller
+    # knows which key its own route opens on, so it is the same answer.
+    if not vk:                    # ROUTE_DEFAULT: the caller's own key
+        return default
+    for name, code in OVERLAY_KEYS.items():
+        if code == vk:
+            return name
+    return f"0x{vk:02X}"
+
+
+def set_overlay_key(game_dir: Path, vk: int) -> None:
+    """Bind ReShade's overlay to `vk`. The three zeros are ctrl/shift/alt."""
+    if not vk:
+        return
+    p = Path(game_dir) / "ReShade.ini"
+    if not p.is_file():
+        return          # nothing to edit; the install writes it before this
+    ini = Ini.load(p)
+    if len(ini.sections) == 1 and not ini.sections[0][1]:
+        # Load swallows an OSError and hands back an empty Ini (one root
+        # section, no keys). Saving that would replace every ReShade
+        # setting the person has with a single key.
+        raise OSError(f"{p} could not be read")
+    ini.set("INPUT", "KeyOverlay", f"{int(vk)},0,0,0")
+    ini.save(p)
+
+
 # The sections of ReShade.ini that hold what the user set up by hand in the
 # overlay: key bindings, overlay behaviour (tutorial done, fps counter, font
 # size), the theme. ReShade keeps them per game, so every fresh install used
@@ -212,6 +292,70 @@ def write_shader_paths(game_dir: Path) -> None:
     ini.set_default("GENERAL", "PresetPath", r".\ReShadePreset.ini")
     ini.set_default("ADDON", "AddonPath", ".\\")
     ini.save(p)
+
+
+# Where the DLSS 5 add-on keeps its own switches. ReShade gives an add-on
+# config_get/set_config_value, and they land in ReShade.ini under a section
+# of the add-on's choosing - this is the DLSS 5 one, confirmed three ways:
+# a real ReShade.ini beside DEATHLOOP on the owner's machine carries
+# [RenoDX.DLSS5] NeuralUplift=1, the feeder and the bridge both read that
+# section out of the file themselves ("DLSS 5 add-on settings, read from
+# ReShade.ini"), and the same names are in their binaries.
+ADDON_SECTION = "RenoDX.DLSS5"
+ADDON_SWITCH = "NeuralUplift"
+
+
+def addon_state(game_dir: Path) -> dict:
+    """What the DLSS 5 add-on has written about itself, or {}.
+
+    The diagnosis used to end "open the overlay and read the status", which
+    is the question handed back to the person who asked it. The status is
+    in a file, on their disk, next to the game.
+
+    {"switch": "1"|"0"|None, "keys": {...}, "overlay_seen": bool}. An empty
+    dict means there is no ReShade.ini to read - not that anything is off.
+    """
+    p = Path(game_dir) / "ReShade.ini"
+    if not p.is_file():
+        return {}
+    ini = Ini.load(p)
+    keys = {}
+    for name, kv in ini.sections:
+        if name.lower() == ADDON_SECTION.lower():
+            keys = {k: v for k, v in kv}
+            break
+    seen = ""
+    for name, kv in ini.sections:
+        if name.upper() == "ADDON":
+            seen = next((v for k, v in kv if k.lower() == "overlaycollapsed"), "")
+            break
+    switch = next((v for k, v in keys.items()
+                   if k.lower() == ADDON_SWITCH.lower()), None)
+    return {"switch": switch, "keys": keys, "overlay_seen": bool(seen)}
+
+
+def enable_dlss5_addon(game_dir: Path) -> bool:
+    """Ask the DLSS 5 add-on for the neural pass, in its own section.
+
+    Its default is on, so this matters for one case and it is the silent
+    one: somebody who switched it off in the overlay once. ReShade.ini keeps
+    that per game forever, and an install that says "set up" over it is the
+    quiet failure this project keeps chasing.
+
+    Only when the key is absent - a deliberate off is not overruled, and the
+    diagnosis reads the same key back and says which it is. True when the
+    file was written.
+    """
+    p = Path(game_dir) / "ReShade.ini"
+    ini = Ini.load(p)
+    for name, kv in ini.sections:
+        if name.lower() == ADDON_SECTION.lower():
+            if any(k.lower() == ADDON_SWITCH.lower() for k, _ in kv):
+                return False          # their choice, whichever way it went
+            break
+    ini.set_default(ADDON_SECTION, ADDON_SWITCH, "1")
+    ini.save(p)
+    return True
 
 
 def enable_renodx_dlss_nr(game_dir: Path) -> None:

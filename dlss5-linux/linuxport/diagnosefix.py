@@ -30,3 +30,20 @@ def _tail(path: Path, limit: int = LIMIT) -> str:
 
 def install() -> None:
     _diagnose._tail = _tail
+    # New core (2.x) splits diagnose into a package: the real reader lives
+    # in diagnose.evidence and is copied into chain/routes/body at import.
+    # Patch every copy so the wider window actually applies.
+    try:
+        from core.diagnose import evidence as _ev
+        _ev._tail = _tail
+    except Exception:
+        pass
+    for _mod in ("chain", "routes", "body", "live", "helper", "process"):
+        try:
+            _m = getattr(__import__("core.diagnose." + _mod, fromlist=["_tail"]), "_tail", None)
+            import importlib as _il
+            _mm = _il.import_module("core.diagnose." + _mod)
+            if hasattr(_mm, "_tail"):
+                _mm._tail = _tail
+        except Exception:
+            pass

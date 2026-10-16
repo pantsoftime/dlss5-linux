@@ -101,3 +101,16 @@ def _diag_manifest(install_dir: Path) -> dict:
 
 def install_diagnose() -> None:
     _diag._manifest = _diag_manifest
+    # New core (2.x): the reader lives in diagnose.evidence; patch it too.
+    try:
+        import importlib as _il
+        _ev = _il.import_module("core.diagnose.evidence")
+        if hasattr(_ev, "_manifest"):
+            _orig_ev = _ev._manifest
+
+            def _ev_manifest(install_dir: Path) -> dict:
+                return _orig_ev(install_dir) or _from_proton_state(install_dir) or {}
+
+            _ev._manifest = _ev_manifest
+    except Exception:
+        pass
