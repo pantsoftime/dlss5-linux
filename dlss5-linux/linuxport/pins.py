@@ -55,7 +55,9 @@ def _local(p: Path, tag: str) -> tuple[str, str]:
     return tag, f"file://{dest}"
 
 
-def resolve() -> tuple[str, str]:
+def resolve(build: str = "") -> tuple[str, str]:
+    if build:
+        return _orig_resolve(build)
     c = _choice
     if c == "latest":
         return _orig_resolve()
