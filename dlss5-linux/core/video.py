@@ -28,7 +28,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from . import games, log, net, prefs, sources
+from . import child, games, log, net, prefs, sources
 
 PLAYER = "MPC-HC"
 PLAYER_EXE = "mpc-hc64.exe"
@@ -83,7 +83,7 @@ def is_player(folder: Path) -> bool:
 
 def resolve_player() -> tuple[str, str]:
     """(tag, url) of the newest MPC-HC x64 portable zip."""
-    data = sources._json(MPC_API)
+    data = sources.json_or_html(MPC_API)
     for a in data.get("assets", []):
         n = a.get("name", "")
         if n.lower().endswith("x64.zip"):
@@ -93,7 +93,7 @@ def resolve_player() -> tuple[str, str]:
 
 def resolve_ytdlp() -> tuple[str, str]:
     """(tag, url) of the newest yt-dlp.exe (64-bit)."""
-    data = sources._json(YTDLP_API)
+    data = sources.json_or_html(YTDLP_API)
     for a in data.get("assets", []):
         if a.get("name") == YTDLP:
             return data.get("tag_name", "?"), a["browser_download_url"]
@@ -215,7 +215,15 @@ def prepare(folder: Path, on_prog=None, on_log=None) -> games.Game:
                 rel = n[len(top):] if top else n
                 if not rel:
                     continue
-                dst = folder / rel
+                # The only place here that keeps an archive's own folder
+                # structure, so the only one where a `../` member could
+                # write outside the player folder (#79).
+                try:
+                    dst = net.inside(folder, rel)
+                except net.OutsideError as e:
+                    raise RuntimeError(
+                        f"The {PLAYER} archive contains a path that writes "
+                        f"outside {folder} - refusing it. ({e})") from None
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(n) as src, open(dst, "wb") as out:
                     out.write(src.read())
@@ -278,11 +286,21 @@ def launch(folder: Path, target: str = "") -> None:
     args = [str(exe)]
     if target:
         args += [target, "/play"]
-    subprocess.Popen(args, cwd=str(folder))
+    child.popen(args, cwd=str(folder))
 
 
-FFMPEG_API = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
+# BtbN publishes a rolling release tagged "latest" whose asset names never
+# change, and a dated autobuild every few hours whose names carry the build
+# hash. /releases/latest returns the DATED one, so looking for the stable
+# name in it found nothing and every video download failed with "ffmpeg
+# build not found on GitHub" (issue #75). The tag is the one to ask for.
+FFMPEG_API = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest"
 FFMPEG_ASSET = "ffmpeg-master-latest-win64-gpl.zip"
+# ...and when the API is out of reach or the names change again, the tag's
+# download URL resolves on its own, the same fallback the ReShade and
+# DLSS5-Reshade-AIO downloads use.
+FFMPEG_DIRECT = ("https://github.com/BtbN/FFmpeg-Builds/releases/download/"
+                 "latest/" + FFMPEG_ASSET)
 FFMPEG = "ffmpeg.exe"
 FFPROBE = "ffprobe.exe"
 DOWNLOADS = "downloads"
@@ -319,7 +337,7 @@ def ensure_processor(folder: Path, on_prog=None, on_log=None) -> Path:
     if not has_processor(folder):
         url = PROCESSOR_LATEST
         try:
-            data = sources._json(PROCESSOR_API)
+            data = sources.json_or_html(PROCESSOR_API)
             url = next((a["browser_download_url"] for a in data.get("assets", [])
                         if a.get("name") == PROCESSOR_ASSET), url)
         except Exception:
@@ -347,14 +365,14 @@ def ensure_processor(folder: Path, on_prog=None, on_log=None) -> Path:
         ensure_ffmpeg(folder, on_prog=on_prog, on_log=on_log)
     for dll in ("nvngx_dlssnr.dll", "nvngx_dlss.dll"):
         if not (folder / dll).is_file():
-            raise RuntimeError(f"{dll} is not beside the player - press INSTALL "
-                               f"first, the processor uses the same runtimes")
+            raise RuntimeError(f"{dll} is not beside the player - press install on "
+                               f"the player first, the processor uses the same runtimes")
     return d / PROCESSOR_EXE
 
 
 def _probe(folder: Path, src: Path) -> tuple[int, int, float, int]:
     import subprocess
-    out = subprocess.run(
+    out = child.run(
         [str(tools_dir(folder) / FFPROBE), "-v", "error", "-select_streams", "v:0",
          "-show_entries", "stream=width,height,r_frame_rate,nb_frames",
          "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1",
@@ -422,11 +440,11 @@ def process(folder: Path, src: Path, scale: str = "native", style: int = 0,
            "-c:v", "hevc_nvenc", "-preset", "p5", "-pix_fmt", "yuv420p",
            "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest",
            str(dst)]
-    p1 = subprocess.Popen(dec, stdout=subprocess.PIPE, creationflags=flags)
-    p2 = subprocess.Popen(tool, stdin=p1.stdout, stdout=subprocess.PIPE,
+    p1 = child.popen(dec, stdout=subprocess.PIPE, creationflags=flags)
+    p2 = child.popen(tool, stdin=p1.stdout, stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE, cwd=str(exe.parent), creationflags=flags)
     p1.stdout.close()
-    p3 = subprocess.Popen(enc, stdin=p2.stdout, stderr=subprocess.PIPE, creationflags=flags)
+    p3 = child.popen(enc, stdin=p2.stdout, stderr=subprocess.PIPE, creationflags=flags)
     p2.stdout.close()
     errs: list[str] = []
     rx = re.compile(rb"^NRPROG (\d+) ([\d.]+)")
@@ -481,7 +499,7 @@ def ensure_deno(folder: Path, on_prog=None, on_log=None) -> Path | None:
     dst = tools_dir(folder) / DENO
     say = on_log or (lambda *_: None)
     if not dst.is_file():
-        data = sources._json(DENO_API)
+        data = sources.json_or_html(DENO_API)
         url = next((a["browser_download_url"] for a in data.get("assets", [])
                     if a.get("name") == DENO_ASSET), None)
         if not url:
@@ -555,11 +573,23 @@ def ensure_ffmpeg(folder: Path, on_prog=None, on_log=None) -> Path:
     if dst.is_file():
         return dst
     say = on_log or (lambda *_: None)
-    data = sources._json(FFMPEG_API)
-    url = next((a["browser_download_url"] for a in data.get("assets", [])
-                if a.get("name") == FFMPEG_ASSET), None)
-    if not url:
-        raise RuntimeError("ffmpeg build not found on GitHub")
+    url = None
+    try:
+        assets = sources.json_or_html(FFMPEG_API).get("assets", [])
+        url = next((a["browser_download_url"] for a in assets
+                    if a.get("name") == FFMPEG_ASSET), None)
+        if not url:
+            # The exact name has moved before. Any static 64-bit Windows GPL
+            # build in that release will do: not -shared (it needs its DLLs
+            # beside it), not lgpl (no NVENC), not arm64.
+            url = next((a["browser_download_url"] for a in assets
+                        if (n := a.get("name", "").lower()).endswith(".zip")
+                        and "win64" in n and "gpl" in n
+                        and "lgpl" not in n and "shared" not in n), None)
+    except Exception as e:
+        say(f"      the ffmpeg release listing did not answer ({e}); "
+            f"using the direct download")
+    url = url or FFMPEG_DIRECT
 
     def p(done: int, total: int) -> None:
         if on_prog:
@@ -616,7 +646,7 @@ def download(folder: Path, url: str, on_prog=None, on_log=None,
     args.append(url.strip())
     say(f"      yt-dlp: best video up to {cap}p + audio, merged to mp4")
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    proc = subprocess.Popen(args, cwd=str(tools_dir(folder)), stdout=subprocess.PIPE,
+    proc = child.popen(args, cwd=str(tools_dir(folder)), stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True,
                             encoding="utf8", errors="replace",
                             creationflags=creationflags)
@@ -665,7 +695,7 @@ def list_cameras(folder: Path) -> list[str]:
     if not ff.is_file():
         return []
     try:
-        out = subprocess.run([str(ff), "-hide_banner", "-list_devices", "true",
+        out = child.run([str(ff), "-hide_banner", "-list_devices", "true",
                               "-f", "dshow", "-i", "dummy"],
                              capture_output=True, text=True, encoding="utf8",
                              errors="replace", timeout=20,
@@ -699,13 +729,13 @@ def start_webcam(folder: Path, camera: str, size: str = "1280x720", fps: int = 3
                  "-g", str(fps), "-pix_fmt", "yuv420p", "-f", "mpegts",
                  f"udp://127.0.0.1:{WEBCAM_PORT}?pkt_size=1316"])
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    _webcam_proc = subprocess.Popen(command(True), cwd=str(tools_dir(folder)),
+    _webcam_proc = child.popen(command(True), cwd=str(tools_dir(folder)),
                                     creationflags=flags)
     import time
     time.sleep(2.0)
     if _webcam_proc.poll() is not None:
         # The size/rate was refused: try the camera's own default.
-        _webcam_proc = subprocess.Popen(command(False), cwd=str(tools_dir(folder)),
+        _webcam_proc = child.popen(command(False), cwd=str(tools_dir(folder)),
                                         creationflags=flags)
         time.sleep(2.0)
         if _webcam_proc.poll() is not None:
@@ -1108,7 +1138,7 @@ class _WindowFeed:
         self.gpu = gpu
         self.since_open = 0
         try:
-            return subprocess.Popen(window_pipe_command(self.ff, wd, ht, self.fps, gpu),
+            return child.popen(window_pipe_command(self.ff, wd, ht, self.fps, gpu),
                                     stdin=subprocess.PIPE, cwd=str(self.ff.parent),
                                     creationflags=flags)
         except OSError:
@@ -1215,13 +1245,13 @@ def start_screen(folder: Path, target: str, fps: int = 30):
             _window_feed = None
             raise RuntimeError(f"could not capture '{target}'")
         exe = Path(folder) / PLAYER_EXE
-        subprocess.Popen([str(exe), WEBCAM_URL, "/play"], cwd=str(folder))
+        child.popen([str(exe), WEBCAM_URL, "/play"], cwd=str(folder))
         _watch_player()
         return None
     region, idx, park, other = plan_capture(target)
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     for gpu in (True, False):
-        _webcam_proc = subprocess.Popen(capture_command(ff, target, fps, gpu, region, idx),
+        _webcam_proc = child.popen(capture_command(ff, target, fps, gpu, region, idx),
                                         cwd=str(tools_dir(folder)), creationflags=flags)
         time.sleep(2.0)
         if _webcam_proc.poll() is None:
@@ -1231,7 +1261,7 @@ def start_screen(folder: Path, target: str, fps: int = 30):
         raise RuntimeError(f"ffmpeg could not capture '{target}' - a window has to be "
                            f"open and not minimised; a screen number has to exist")
     exe = Path(folder) / PLAYER_EXE
-    player = subprocess.Popen([str(exe), WEBCAM_URL, "/play"], cwd=str(folder))
+    player = child.popen([str(exe), WEBCAM_URL, "/play"], cwd=str(folder))
 
     def park_player() -> None:
         h = _player_hwnd(player.pid)

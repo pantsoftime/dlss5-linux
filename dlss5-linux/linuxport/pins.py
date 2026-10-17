@@ -46,16 +46,20 @@ def _by_tag(tag: str) -> tuple[str, str]:
 
 
 def _local(p: Path, tag: str) -> tuple[str, str]:
-    # The installer asks net.download() for f"OptiScaler-DLSSNR-{tag}.zip";
-    # put the file there under that name so it is returned without a fetch.
+    # Stage the file in the cache under the name the installer will ask
+    # for, preserving the extension (.7z nightlies, .zip releases) so
+    # net.download()'s magic check validates the right format.
+    ext = p.suffix.lower() if p.suffix.lower() in (".7z", ".zip") else ".zip"
     net.cache_dir().mkdir(parents=True, exist_ok=True)
-    dest = net.cache_dir() / f"OptiScaler-DLSSNR-{tag}.zip"
+    dest = net.cache_dir() / f"OptiScaler-DLSSNR-{tag}{ext}"
     if not dest.is_file() or dest.stat().st_size != p.stat().st_size:
         shutil.copy2(p, dest)
     return tag, f"file://{dest}"
 
 
-def resolve() -> tuple[str, str]:
+def resolve(build: str = "") -> tuple[str, str]:
+    if build:
+        return _orig_resolve(build)
     c = _choice
     if c == "latest":
         return _orig_resolve()

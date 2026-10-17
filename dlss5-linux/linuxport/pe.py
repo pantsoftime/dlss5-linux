@@ -32,9 +32,13 @@ def _inside_game_tree(d: Path) -> bool:
         return False
 
 
-def _has_d3d12_agility_sdk(folder: Path) -> bool:
-    if _orig(folder):
-        return True
+def _has_d3d12_agility_sdk(folder: Path, bits: int | None = None) -> bool:
+    try:
+        if _orig(folder) if _orig.__code__.co_argcount == 1 else _orig(folder, bits):
+            return True
+    except TypeError:
+        if _orig(folder):
+            return True
     # Walk up to the game root (bounded) and look where engines keep DLSS.
     root = folder
     for _ in range(4):

@@ -68,15 +68,15 @@ def install() -> None:
 _orig_at_least = _gpu.driver_at_least if hasattr(_gpu, "driver_at_least") else None
 
 
-def driver_at_least(want: str) -> bool | None:
-    have = _gpu.driver_version()
+def driver_at_least(want: str, have: str | None = None) -> bool | None:
+    have = have or _gpu.driver_version()
     try:
         major = int(str(have).split(".")[0])
     except (TypeError, ValueError):
         return None
     if major >= 610:
         return True
-    return _orig_at_least(want) if _orig_at_least else None
+    return _orig_at_least(want, have) if _orig_at_least else None
 
 
 def install_gates() -> None:

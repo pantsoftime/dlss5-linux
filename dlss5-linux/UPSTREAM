@@ -1,5 +1,4 @@
 Kizzuwatnaa/DLSS5-Autopilot
-commit 8225fff (v1.7.1, 2026-09-06)
+commit 8160c6fe7b57d488e3d192a971ec729056dbabc9 (VERSION = "2.0.8", 2026-10-16)
 license MIT (see LICENSE.upstream)
-core/ vendored unmodified; all Linux changes live in linuxport/
-previous: 23f96c6 (v1.6.1, 2026-09-05)
+core/ vendored with Linux shims in linuxport/; previous: pantsoftime 1.7.1 (8225fff)
